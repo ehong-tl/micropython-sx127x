@@ -1,8 +1,8 @@
 from sx127x import SX127x
 
-import LoRaSender
-import LoRaReceiver
-
+from examples import LoRaSender
+from examples import LoRaReceiver
+from examples import LoRaPing
 
 lora_default = {
     "frequency": 869525000,
@@ -30,10 +30,17 @@ lora_pins = {
 lora = SX127x(pins=lora_pins, parameters=lora_default)
 
 # type = 'sender'
-type = 'receiver'
+# type = 'receiver'
+# type = 'ping_master'
+type = 'ping_slave'
+
 
 if __name__ == '__main__':
     if type == 'sender':
         LoRaSender.send(lora)
     if type == 'receiver':
         LoRaReceiver.receive(lora)
+    if type == 'ping_master':
+        LoRaPing.ping(lora, master=True)
+    if type == 'ping_slave':
+        LoRaPing.ping(lora, master=False)

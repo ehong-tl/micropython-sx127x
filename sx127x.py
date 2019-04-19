@@ -1,4 +1,4 @@
-from time import sleep
+from time import sleep, ticks_ms
 from machine import SPI, Pin
 import gc
 
@@ -215,14 +215,15 @@ class SX127x:
         self.aquire_lock(False)
         self.collect_garbage()
 
+
     def getIrqFlags(self):
         irqFlags = self.readRegister(REG_IRQ_FLAGS)
         self.writeRegister(REG_IRQ_FLAGS, irqFlags)
         return irqFlags
 
+
     def packetRssi(self, rfi="hf"):
         packet_rssi = self.readRegister(REG_PKT_RSSI_VALUE)
-        print("SX rssi:{}".format(packet_rssi))
         return packet_rssi - (157 if rfi == "hf" else 164)
 
 
@@ -397,6 +398,18 @@ class SX127x:
         self.writeRegister(
             REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_CONTINUOUS
         )
+
+
+    def listen(self, time = 1000):
+        time = min(max(time, 0), 10000)
+        self.receive()
+
+        start = ticks_ms()
+        while True:
+            if self.receivedPacket():
+                return self.read_payload()
+            if ticks_ms() - start > time:
+                return None
 
 
     def handleOnReceive(self, event_source):

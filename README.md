@@ -1,4 +1,4 @@
-# uPyLora
+# uLoRa
 Micropython library to support LoRa modulation with Semtech SX1276 module
 
 # Setup
