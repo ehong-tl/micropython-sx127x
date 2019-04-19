@@ -1,20 +1,39 @@
-#import LoRaDuplexCallback
-import LoRaPingPong
-#import LoRaSender
-#import LoRaReceiver
-import config_lora
 from sx127x import SX127x
-from controller_esp32 import ESP32Controller
+
+import LoRaSender
+import LoRaReceiver
 
 
-controller = ESP32Controller()
-lora = controller.add_transceiver(SX127x(name = 'LoRa'),
-                                  pin_id_ss = ESP32Controller.PIN_ID_FOR_LORA_SS,
-                                  pin_id_RxDone = ESP32Controller.PIN_ID_FOR_LORA_DIO0)
+lora_default = {
+    "frequency": 869525000,
+    "frequency_offset":0,
+    "tx_power_level": 14,
+    "signal_bandwidth": 125e3,
+    "spreading_factor": 9,
+    "coding_rate": 5,
+    "preamble_length": 8,
+    "implicitHeader": False,
+    "sync_word": 0x12,
+    "enable_CRC": True,
+    "invert_IQ": False,
+}
 
+lora_pins = {
+    'rx_done':26,
+    'ss':18,
+    'reset':16,
+    'sck':5,
+    'miso':19,
+    'mosi':27,
+}
 
+lora = SX127x(pins=lora_pins, parameters=lora_default)
 
-#LoRaDuplexCallback.duplexCallback(lora)
-LoRaPingPong.ping_pong(lora)
-#LoRaSender.send(lora)
-#LoRaReceiver.receive(lora)
+# type = 'sender'
+type = 'receiver'
+
+if __name__ == '__main__':
+    if type == 'sender':
+        LoRaSender.send(lora)
+    if type == 'receiver':
+        LoRaReceiver.receive(lora)
