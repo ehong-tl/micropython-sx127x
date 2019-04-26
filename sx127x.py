@@ -79,38 +79,30 @@ MAX_PKT_LENGTH = 255
 class SX127x:
 
     default_parameters = {
-        "frequency": 869525000,
-        "frequency_offset":0,
-        "tx_power_level": 14,
-        "signal_bandwidth": 125e3,
-        "spreading_factor": 9,
-        "coding_rate": 5,
-        "preamble_length": 8,
-        "implicitHeader": False,
-        "sync_word": 0x12,
-        "enable_CRC": True,
-        "invert_IQ": False,
+        'frequency': 869525000,
+        'frequency_offset':0,
+        'tx_power_level': 14,
+        'signal_bandwidth': 125e3,
+        'spreading_factor': 9,
+        'coding_rate': 5,
+        'preamble_length': 8,
+        'implicitHeader': False,
+        'sync_word': 0x12,
+        'enable_CRC': True,
+        'invert_IQ': False,
     }
 
 
-    def __init__(self, pins, parameters={}, onReceive=None):
+    def __init__(self, spi, pins, parameters={}, onReceive=None):
+        self.spi = spi
         self.pins = pins
         self.parameters = parameters
+
+        self.pin_ss = Pin(self.pins['ss'], Pin.OUT)
+
         self._onReceive = onReceive
         self._lock = False
         self._implicitHeaderMode = None
-
-        self.spi = SPI(
-            baudrate=10000000,
-            polarity=0,
-            phase=0,
-            bits=8,
-            firstbit=SPI.MSB,
-            sck=Pin(self.pins["sck"], Pin.OUT, Pin.PULL_DOWN),
-            mosi=Pin(self.pins["mosi"], Pin.OUT, Pin.PULL_UP),
-            miso=Pin(self.pins["miso"], Pin.IN, Pin.PULL_UP),
-        )
-        self.pin_ss = Pin(self.pins["ss"], Pin.OUT)
 
         self.parameters = SX127x.default_parameters
         if parameters:
@@ -123,32 +115,32 @@ class SX127x:
             if version:
                 break
         # debug output
-        print("SX version: {}".format(version))
+        print('SX version: {}'.format(version))
 
         # put in LoRa and sleep mode
         self.sleep()
         # config
-        self.setFrequency(self.parameters["frequency"])
-        self.setSignalBandwidth(self.parameters["signal_bandwidth"])
+        self.setFrequency(self.parameters['frequency'])
+        self.setSignalBandwidth(self.parameters['signal_bandwidth'])
 
         # set LNA boost
         self.writeRegister(REG_LNA, self.readRegister(REG_LNA) | 0x03)
         # set auto AGC
         self.writeRegister(REG_MODEM_CONFIG_3, 0x04)
 
-        self.setTxPower(self.parameters["tx_power_level"])
-        self.implicitHeaderMode(self.parameters["implicitHeader"])
-        self.setSpreadingFactor(self.parameters["spreading_factor"])
-        self.setCodingRate(self.parameters["coding_rate"])
-        self.setPreambleLength(self.parameters["preamble_length"])
-        self.setSyncWord(self.parameters["sync_word"])
-        self.enableCRC(self.parameters["enable_CRC"])
-        self.invertIQ(self.parameters["invert_IQ"])
+        self.setTxPower(self.parameters['tx_power_level'])
+        self.implicitHeaderMode(self.parameters['implicitHeader'])
+        self.setSpreadingFactor(self.parameters['spreading_factor'])
+        self.setCodingRate(self.parameters['coding_rate'])
+        self.setPreambleLength(self.parameters['preamble_length'])
+        self.setSyncWord(self.parameters['sync_word'])
+        self.enableCRC(self.parameters['enable_CRC'])
+        self.invertIQ(self.parameters['invert_IQ'])
 
         # set LowDataRateOptimize flag if symbol time > 16ms (default disable on reset)
         # self.writeRegister(REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) & 0xF7)  # default disable on reset
-        bw = self.parameters["signal_bandwidth"]
-        sf = self.parameters["spreading_factor"]
+        bw = self.parameters['signal_bandwidth']
+        sf = self.parameters['spreading_factor']
         if 1000 / bw / 2 ** sf  > 16:
             self.writeRegister(
                 REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) | 0x08
@@ -195,8 +187,10 @@ class SX127x:
         self.writeRegister(REG_PAYLOAD_LENGTH, currentLength + size)
         return size
 
+
     def aquire_lock(self, lock=False):
         self._lock = False
+
 
     def println(self, message, implicitHeader=False, repeat=1):
         # wait until RX_Done, lock and begin writing
@@ -222,9 +216,9 @@ class SX127x:
         return irqFlags
 
 
-    def packetRssi(self, rfi="hf"):
+    def packetRssi(self, rfi='hf'):
         packet_rssi = self.readRegister(REG_PKT_RSSI_VALUE)
-        return packet_rssi - (157 if rfi == "hf" else 164)
+        return packet_rssi - (157 if rfi == 'hf' else 164)
 
 
     def packetSnr(self):
@@ -240,6 +234,7 @@ class SX127x:
 
 
     def setTxPower(self, level, outputPin=PA_OUTPUT_PA_BOOST_PIN):
+        self.parameters['tx_power_level'] = level
         if outputPin == PA_OUTPUT_RFO_PIN:
             # RFO
             level = min(max(level, 0), 14)
@@ -249,9 +244,12 @@ class SX127x:
             level = min(max(level, 2), 17)
             self.writeRegister(REG_PA_CONFIG, PA_BOOST | (level - 2))
 
+
     def setFrequency(self, frequency):
+        # TODO min max limit
         frequency = int(frequency)
-        self._frequency = frequency
+        self.parameters['frequency'] = frequency
+        frequency += self.parameters['frequency_offset']
 
         frf = (frequency << 19) // 32000000
         self.writeRegister(REG_FRF_MSB, (frf >> 16) & 0xFF)
@@ -317,8 +315,9 @@ class SX127x:
         self.writeRegister(REG_MODEM_CONFIG_2, config)
 
 
-    def invertIQ(self, invert):
-        if invert:
+    def invertIQ(self, invertIQ):
+        self.parameters['invertIQ'] = invertIQ
+        if invertIQ:
             self.writeRegister(
                 REG_INVERTIQ,
                 (
@@ -352,9 +351,23 @@ class SX127x:
         self.writeRegister(REG_SYNC_WORD, sw)
 
 
+    def setChannel(self, parameters):
+        self.standby()
+        for key in parameters:
+            if key == 'frequency':
+                self.setFrequency(parameters[key])
+                continue
+            if key == 'invert_IQ':
+                self.invertIQ(parameters[key])
+                continue
+            if key == 'tx_power_level':                
+                self.setTxPower(parameters[key])
+                continue
+
+
     def dumpRegisters(self):
         for i in range(128):
-            print("0x{0:02x}: {1:02x}".format(i, self.readRegister(i)), end='')
+            print('0x{0:02x}: {1:02x}'.format(i, self.readRegister(i)), end='')
             if (i+1) % 4 == 0:
                 print()
             else:
@@ -381,6 +394,7 @@ class SX127x:
         if self.pin_RxDone:
             if callback:
                 self.writeRegister(REG_DIO_MAPPING_1, 0x00)
+                p25.irq(trigger=machine.Pin.IRQ_FALLING, handler=callback)
                 self.pin_RxDone.set_handler_for_irq_on_rising_edge(
                     handler=self.handleOnReceive
                 )
@@ -413,12 +427,12 @@ class SX127x:
 
 
     def handleOnReceive(self, event_source):
-        self.aquire_lock(True)  # lock until TX_Done
+        # lock until TX_Done
+        self.aquire_lock(True)
         irqFlags = self.getIrqFlags()
 
-        if (
-            irqFlags == IRQ_RX_DONE_MASK
-        ):  # RX_DONE only, irqFlags should be 0x40
+        # RX_DONE only, irqFlags should be 0x40
+        if (irqFlags == IRQ_RX_DONE_MASK):
             # automatically standby when RX_DONE
             if self._onReceive:
                 payload = self.read_payload()
@@ -465,7 +479,6 @@ class SX127x:
 
     def receivedPacket(self, size=0):
         irqFlags = self.getIrqFlags()
-
         self.implicitHeaderMode(size > 0)
         if size > 0:
             self.writeRegister(REG_PAYLOAD_LENGTH, size & 0xFF)
@@ -513,7 +526,7 @@ class SX127x:
         return bytes(payload)
 
 
-    def readRegister(self, address, byteorder="big", signed=False):
+    def readRegister(self, address, byteorder='big', signed=False):
         response = self.transfer(address & 0x7F)
         return int.from_bytes(response, byteorder)
 
