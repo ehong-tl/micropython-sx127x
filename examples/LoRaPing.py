@@ -27,6 +27,6 @@ def ping(lora, master):
                 counter += 1
         else:
             if lora.receivedPacket():
-                payload = lora.read_payload().decode()
+                payload = lora.readPayload().decode()
                 print('{} RX: {}'.format(ticks_ms(), payload))
                 lora.println(payload)

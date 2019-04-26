@@ -4,7 +4,7 @@ def receive(lora):
     while True:
         if lora.receivedPacket():
             try:
-                payload = lora.read_payload().decode()
+                payload = lora.readPayload().decode()
                 rssi = lora.packetRssi()
                 print("RX: {} | RSSI: {}".format(payload, rssi))
             except Exception as e:
