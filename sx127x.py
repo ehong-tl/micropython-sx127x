@@ -1,7 +1,7 @@
-from time import sleep, ticks_ms
+from time import sleep, sleep_ms, sleep_us, ticks_ms, ticks_diff
 from machine import SPI, Pin
-from micropython import const
 import gc
+from math import ceil
 
 
 PA_OUTPUT_RFO_PIN = const(0)
@@ -76,6 +76,12 @@ IRQ_RX_TIME_OUT_MASK = const(0x80)
 # Buffer size
 MAX_PKT_LENGTH = const(255)
 
+# For Time-On-Air calculation
+SX127X_REG_MODEM_CONFIG_1 = const(0x1D)
+SX127X_REG_MODEM_CONFIG_2 = const(0x1E)
+SX127X_REG_PREAMBLE_MSB = const(0x20)
+SX127X_REG_PREAMBLE_LSB = const(0x21)
+
 
 class SX127x:
 
@@ -98,7 +104,9 @@ class SX127x:
         self.pins = pins
         self.parameters = parameters
 
-        self.pin_ss = Pin(self.pins["ss"], Pin.OUT)
+        self.pin_ss = Pin(self.pins["ss"], mode=Pin.OUT)
+        self.pin_reset = Pin(self.pins["reset"], mode=Pin.OUT)
+        self.manual_reset()
 
         self.lock = False
         self.implicit_header_mode = None
@@ -114,7 +122,8 @@ class SX127x:
             if version:
                 break
         # debug output
-        print("SX version: {}".format(version))
+        if version != 0x12:
+            raise Exception('Invalid version.')
 
         # put in LoRa and sleep mode
         self.sleep()
@@ -147,9 +156,15 @@ class SX127x:
 
         # set base addresses
         self.writeRegister(REG_FIFO_TX_BASE_ADDR, FifoTxBaseAddr)
-        self.writeRegister(REG_FIFO_RX_BASE_ADDR, FifoRxBaseAddr)
+        self.writeRegister(REG_FIFO_RX_BASE_ADDR, FifoRxBaseAddr)   
 
         self.standby()
+
+    def manual_reset(self):
+        self.pin_reset.value(0)
+        sleep_ms(100)
+        self.pin_reset.value(1)
+        sleep_ms(100)
 
     def beginPacket(self, implicitHeaderMode=False):
         self.standby()
@@ -163,7 +178,11 @@ class SX127x:
         # put in TX mode
         self.writeRegister(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX)
         # wait for TX done, standby automatically on TX_DONE
+        start_tx_time = ticks_ms()
         while (self.readRegister(REG_IRQ_FLAGS) & IRQ_TX_DONE_MASK) == 0:
+            if abs(ticks_diff(ticks_ms(), start_tx_time)) >= self.tx_timeout:
+                self.writeRegister(REG_IRQ_FLAGS, IRQ_TX_DONE_MASK)
+                raise Exception('TX timeout.')
             pass
         # clear IRQ's
         self.writeRegister(REG_IRQ_FLAGS, IRQ_TX_DONE_MASK)
@@ -196,6 +215,8 @@ class SX127x:
         self.beginPacket(implicitHeader)
         self.write(message)
 
+        self.tx_timeout = self.timeOnAir(len(message)) * 1.5 # ms
+
         for i in range(repeat):
             self.endPacket()
 
@@ -214,6 +235,21 @@ class SX127x:
 
     def packetSnr(self):
         return (self.readRegister(REG_PKT_SNR_VALUE)) * 0.25
+
+    def timeOnAir(self, length):
+        symbolLength = float(float(1 << self._sf) / float(self._bw/1000.0))
+        de = 0.0
+        if symbolLength >= 16.0:
+            de = 1.0
+        ih = float(self.spiGetValue(SX127X_REG_MODEM_CONFIG_1, 0, 0))
+        crc = float(self.spiGetValue(SX127X_REG_MODEM_CONFIG_2, 2, 2) >> 2)
+        n_pre = float((self.spiGetValue(SX127X_REG_PREAMBLE_MSB) << 8) | self.spiGetValue(SX127X_REG_PREAMBLE_LSB))
+        n_pay = float(8.0 + max(ceil((8.0 * float(length) - 4.0 * float(self._sf) + 28.0 + 16.0 * crc - 20.0 * ih)/(4.0 * float(self._sf) - 8.0 * de)) * float(self._cr), 0.0))
+        return symbolLength * (n_pre + n_pay + 4.25)
+
+    def spiGetValue(self, reg, msb=7, lsb=0):
+        rawValue = self.readRegister(reg)
+        return rawValue & ((0b11111111 << lsb) & (0b11111111 >> (7 - msb)))
 
     def standby(self):
         self.writeRegister(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY)
@@ -251,6 +287,7 @@ class SX127x:
             REG_MODEM_CONFIG_2,
             (self.readRegister(REG_MODEM_CONFIG_2) & 0x0F) | ((sf << 4) & 0xF0),
         )
+        self._sf = sf
 
     def setSignalBandwidth(self, sbw):
         bins = (
@@ -278,6 +315,7 @@ class SX127x:
             REG_MODEM_CONFIG_1,
             (self.readRegister(REG_MODEM_CONFIG_1) & 0x0F) | (bw << 4),
         )
+        self._bw = sbw
 
     def setCodingRate(self, denominator):
         denominator = min(max(denominator, 5), 8)
@@ -286,6 +324,7 @@ class SX127x:
             REG_MODEM_CONFIG_1,
             (self.readRegister(REG_MODEM_CONFIG_1) & 0xF1) | (cr << 1),
         )
+        self._cr = cr + 4
 
     def setPreambleLength(self, length):
         self.writeRegister(REG_PREAMBLE_MSB, (length >> 8) & 0xFF)
@@ -391,14 +430,19 @@ class SX127x:
         self.onReceive = callback
 
         if "dio_0" in self.pins:
-            self.pin_rx_done = Pin(self.pins["dio_0"], Pin.IN)
+            self.pin_rx_done = Pin(self.pins["dio_0"], mode=Pin.IN)
 
         if self.pin_rx_done:
             if callback:
                 self.writeRegister(REG_DIO_MAPPING_1, 0x00)
-                self.pin_rx_done.irq(
-                    trigger=Pin.IRQ_RISING, handler=self.handleOnReceive
-                )
+                try:
+                    self.pin_rx_done.callback(
+                        Pin.IRQ_RISING, self.handleOnReceive
+                        )
+                except:
+                    self.pin_rx_done.irq(
+                        trigger=Pin.IRQ_RISING, handler=self.handleOnReceive
+                    )
             else:
                 pass
                 # TODO detach irq
