@@ -14,6 +14,7 @@ REG_FRF_MSB = const(0x06)
 REG_FRF_MID = const(0x07)
 REG_FRF_LSB = const(0x08)
 REG_PA_CONFIG = const(0x09)
+REG_OCP = const(0x0B)
 REG_LNA = const(0x0C)
 REG_FIFO_ADDR_PTR = const(0x0D)
 
@@ -41,6 +42,7 @@ REG_DETECTION_THRESHOLD = const(0x37)
 REG_SYNC_WORD = const(0x39)
 REG_DIO_MAPPING_1 = const(0x40)
 REG_VERSION = const(0x42)
+REG_PA_DAC = const(0x4D)
 
 # invert IQ
 REG_INVERTIQ = const(0x33)
@@ -258,15 +260,31 @@ class SX127x:
         self.writeRegister(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP)
 
     def setTxPower(self, level, outputPin=PA_OUTPUT_PA_BOOST_PIN):
+        if not ((level >= 0) and (level <= 20)):
+            raise Exception('Invalid output power.')
+        
         self.parameters["tx_power_level"] = level
+
         if outputPin == PA_OUTPUT_RFO_PIN:
             # RFO
             level = min(max(level, 0), 14)
             self.writeRegister(REG_PA_CONFIG, 0x70 | level)
         else:
-            # PA BOOST
-            level = min(max(level, 2), 17)
-            self.writeRegister(REG_PA_CONFIG, PA_BOOST | (level - 2))
+            # PA BOOST 2...20 are valid values
+            level = min(max(level, 2), 20)
+            dacValue = self.readRegister(REG_PA_DAC) & ~7
+            ocpValue = 0
+            if level > 17:
+                dacValue = dacValue | 7
+                ocpValue = 0x20 | 18 # 150 ma [-30 + 10*value]
+                level = level - 5    # normalize to 15 max
+            else:
+                dacValue = dacValue | 4
+                ocpValue = 11     # 100 mA [45 + 5*value]
+                level = level - 2 # normalize to 15 max
+            self.writeRegister(REG_PA_CONFIG, PA_BOOST | level)
+            self.writeRegister(REG_PA_DAC, dacValue)
+            self.writeRegister(REG_OCP, ocpValue)
 
     def setFrequency(self, frequency):
         # TODO min max limit
