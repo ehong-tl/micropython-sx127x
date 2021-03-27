@@ -127,6 +127,9 @@ class SX127x:
         if version != 0x12:
             raise Exception('Invalid version.')
 
+        self._bw = self.parameters["signal_bandwidth"]
+        self._sf = self.parameters["spreading_factor"]
+
         # put in LoRa and sleep mode
         self.sleep()
         # config
