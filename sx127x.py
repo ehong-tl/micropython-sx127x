@@ -155,6 +155,8 @@ class SX127x:
             self.writeRegister(
                 REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) | 0x08
             )
+        else:
+            self.writeRegister(REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) & 0xF7)
 
         # set base addresses
         self.writeRegister(REG_FIFO_TX_BASE_ADDR, FifoTxBaseAddr)
@@ -163,6 +165,8 @@ class SX127x:
         self.standby()
 
     def manual_reset(self):
+        self.pin_reset.value(1)
+        sleep_ms(100)
         self.pin_reset.value(0)
         sleep_ms(100)
         self.pin_reset.value(1)
@@ -306,6 +310,15 @@ class SX127x:
             (self.readRegister(REG_MODEM_CONFIG_2) & 0x0F) | ((sf << 4) & 0xF0),
         )
         self._sf = sf
+        
+        bw = self._bw
+        sf = self._sf
+        if 1000 / bw / 2 ** sf > 16:
+            self.writeRegister(
+                REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) | 0x08
+            )
+        else:
+            self.writeRegister(REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) & 0xF7)
 
     def setSignalBandwidth(self, sbw):
         bins = (
@@ -334,6 +347,15 @@ class SX127x:
             (self.readRegister(REG_MODEM_CONFIG_1) & 0x0F) | (bw << 4),
         )
         self._bw = sbw
+
+        bw = self._bw
+        sf = self._sf
+        if 1000 / bw / 2 ** sf > 16:
+            self.writeRegister(
+                REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) | 0x08
+            )
+        else:
+            self.writeRegister(REG_MODEM_CONFIG_3, self.readRegister(REG_MODEM_CONFIG_3) & 0xF7)
 
     def setCodingRate(self, denominator):
         denominator = min(max(denominator, 5), 8)
