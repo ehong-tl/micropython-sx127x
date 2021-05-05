@@ -243,7 +243,11 @@ class SX127x:
         return packet_rssi - (157 if rfi == "hf" else 164)
 
     def packetSnr(self):
-        return (self.readRegister(REG_PKT_SNR_VALUE)) * 0.25
+        val = self.readRegister(REG_PKT_SNR_VALUE)
+        bits = 8
+        if (val & (1 << (bits - 1))) != 0:
+            val = val - (1 << bits)
+        return val * 0.25
 
     def timeOnAir(self, length):
         symbolLength = float(float(1 << self._sf) / float(self._bw/1000.0))
